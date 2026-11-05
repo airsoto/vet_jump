@@ -8,8 +8,10 @@ workflows:
     environment:
       xcode: latest
       ios_signing:
-        distribution_type: app_store
-        bundle_identifier: com.airsoto.vetjump
+        provisioning_profiles:
+          - vetjump_appstore_profile
+        certificates:
+          - vetjump_distribution
       vars:
         XCODE_PROJECT: VetJUMP.xcodeproj
         XCODE_SCHEME: Vet JUMP
