@@ -15,7 +15,7 @@ final class GameScene: SKScene {
 
     weak var gameDelegate: GameSceneDelegate?
     var level = 1; var platformIndex = 0; var score = 0; var lives = 1; var isInfinite = false
-    private let player = SKShapeNode(rectOf: CGSize(width: 38, height: 38), cornerRadius: 8)
+    private let player = SKShapeNode(rectOf: CGSize(width: 28, height: 28), cornerRadius: 7)
     private let preview = SKShapeNode(); private let landingMarker = SKShapeNode(circleOfRadius: 9)
     private let gravity: CGFloat = 1_800; private let minimumPower: CGFloat = 0.13; private let chargeDuration: TimeInterval = 1.2
     private var state: State = .ready; private var chargingSince: TimeInterval = 0; private var power: CGFloat = 0
@@ -40,7 +40,7 @@ final class GameScene: SKScene {
         player.removeAllChildren(); player.removeFromParent(); let character = ProgressStore.shared.load().selectedCharacter % 4; player.fillColor = [.orange, .systemBlue, .systemYellow, .systemGreen][character]; player.strokeColor = .white.withAlphaComponent(0.45); player.zPosition = 10
         for x in [-9, 9] { let eye = SKShapeNode(circleOfRadius: 6); eye.fillColor = .white; eye.strokeColor = .clear; eye.position = CGPoint(x: x, y: 5); let pupil = SKShapeNode(circleOfRadius: 2.5); pupil.fillColor = .darkGray; pupil.strokeColor = .clear; pupil.position = CGPoint(x: 1.2, y: 0); eye.addChild(pupil); player.addChild(eye) }
         let mouth = SKShapeNode(rectOf: CGSize(width: 15, height: 3), cornerRadius: 1.5); mouth.fillColor = .brown; mouth.strokeColor = .clear; mouth.position = CGPoint(x: 0, y: -9); player.addChild(mouth); addChild(player)
-        preview.strokeColor = .white.withAlphaComponent(0.72); preview.lineWidth = 2; preview.lineDashPattern = [5, 5]; preview.zPosition = 4; preview.isHidden = true; addChild(preview)
+        preview.strokeColor = .white.withAlphaComponent(0.72); preview.lineWidth = 2; preview.zPosition = 4; preview.isHidden = true; addChild(preview)
         landingMarker.zPosition = 5; landingMarker.lineWidth = 3; landingMarker.fillColor = .clear; landingMarker.isHidden = true; addChild(landingMarker)
     }
 
@@ -73,7 +73,7 @@ final class GameScene: SKScene {
     private func releaseJump() { guard state == .charging else { return }; let appliedPower = max(minimumPower, power); velocity = CGVector(dx: appliedPower * 700, dy: -(340 + appliedPower * 620)); launchPlatform = platformIndex; standingPlatform = nil; state = .jumping; preview.isHidden = true; landingMarker.isHidden = true; UIImpactFeedbackGenerator(style: .light).impactOccurred() }
 
     override func update(_ currentTime: TimeInterval) {
-        guard state != .paused && state != .finished else { return }; let delta = lastUpdate == 0 ? 0 : min(CGFloat(currentTime - lastUpdate), 1 / 20); lastUpdate = currentTime; elapsed += TimeInterval(delta)
+        guard state != .paused && state != .finished else { return }; let delta = lastUpdate == 0 ? 0 : min(CGFloat(currentTime - lastUpdate), 1 / 30); lastUpdate = currentTime; elapsed += TimeInterval(delta)
         updatePlatforms(); updateFruitPositions()
         if state == .charging { power = min(CGFloat((currentTime - chargingSince) / chargeDuration), 1); drawTrajectory(for: max(minimumPower, power)) }
         if state == .jumping { updateJump(delta: delta) }
@@ -119,8 +119,8 @@ final class GameScene: SKScene {
     func setPaused(_ paused: Bool) { if paused && state != .finished { state = .paused; touchHeld = false } else if !paused && state == .paused && pendingFruit == nil { state = .ready; lastUpdate = 0 } }
 
     private func drawTrajectory(for power: CGFloat) {
-        var point = player.position; var simulatedVelocity = CGVector(dx: power * 700, dy: -(340 + power * 620)); let path = CGMutablePath(); path.move(to: point); var landing: CGPoint?; let target = platforms.indices.contains(platformIndex + 1) ? platforms[platformIndex + 1] : nil
-        for _ in 0..<40 { simulatedVelocity.dy += gravity * 0.045; let previous = point; point.x += simulatedVelocity.dx * 0.045; point.y -= simulatedVelocity.dy * 0.045; path.addLine(to: point); if let target, simulatedVelocity.dy > 0, previous.y - player.frame.height / 2 >= target.position.y + target.size.height / 2, point.y - player.frame.height / 2 <= target.position.y + target.size.height / 2 { landing = point; break } }
+        var point = player.position; var simulatedVelocity = CGVector(dx: power * 700, dy: -(340 + power * 620)); let path = CGMutablePath(); var landing: CGPoint?; let target = platforms.indices.contains(platformIndex + 1) ? platforms[platformIndex + 1] : nil
+        for step in 0..<40 { simulatedVelocity.dy += gravity * 0.045; let previous = point; point.x += simulatedVelocity.dx * 0.045; point.y -= simulatedVelocity.dy * 0.045; if step.isMultiple(of: 2) { path.move(to: previous); path.addLine(to: point) }; if let target, simulatedVelocity.dy > 0, previous.y - player.frame.height / 2 >= target.position.y + target.size.height / 2, point.y - player.frame.height / 2 <= target.position.y + target.size.height / 2 { landing = point; break } }
         preview.path = path; landingMarker.position = landing ?? point; let viable = landing.map { point in guard let target else { return false }; return point.x + player.frame.width / 2 >= target.position.x - target.size.width / 2 && point.x - player.frame.width / 2 <= target.position.x + target.size.width / 2 } ?? false; landingMarker.strokeColor = viable ? .systemGreen : .systemRed
     }
     private func updateCamera(delta: CGFloat) { guard player.position.x > size.width * 0.46 else { return }; let shift = (player.position.x - size.width * 0.34) * min(1, delta * 10); player.position.x -= shift; previousPosition.x -= shift; for platform in platforms { platform.position.x -= shift }; for (index, motion) in motions { motions[index] = Motion(axis: motion.axis, amplitude: motion.amplitude, period: motion.period, origin: CGPoint(x: motion.origin.x - shift, y: motion.origin.y)) }; for fruit in fruits { fruit.node.position.x -= shift }; preview.position.x -= shift; landingMarker.position.x -= shift }
