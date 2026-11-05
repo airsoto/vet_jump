@@ -25,5 +25,7 @@ El archivo `codemagic.yaml` genera un `.ipa` firmado. En Codemagic deben existir
 
 ## Controles
 
-- Mantén pulsada la pantalla desde una plataforma para cargar el salto y suelta para saltar.
-- Vuelve a tocar en el aire para planear; inclina el iPhone hacia atrás para ayudar al planeo y a los lados para corregir la trayectoria.
+- Mantén pulsada la pantalla desde una plataforma para cargar el salto durante hasta 1,2 s y suelta para saltar. La velocidad aplicada es `vx = potencia × 700` y `vy = -(340 + potencia × 620)`.
+- La trayectoria punteada usa la física sin planeo y marca el posible aterrizaje en verde o rojo. Durante la caída, vuelve a mantener pulsado o inclina el iPhone hacia atrás para planear; la inclinación lateral corrige la trayectoria.
+- El planeo reduce la gravedad al 30 %, limita la caída a 360 px/s y frena el avance. Su energía se recarga completamente en cada aterrizaje y dura 3, 2,5, 2, 1,5 o 1 s según el nivel.
+- Solo la siguiente plataforma permite avanzar: los aterrizajes normales suman +1 y los centrados suman +2. Al caer se consume una vida y se reaparece en la plataforma desde la que se saltó; sin vidas se activa el examen de rescate de 10 preguntas (mínimo 7).

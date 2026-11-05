@@ -1,6 +1,5 @@
 import SpriteKit
 import CoreMotion
-import GameKit
 
 protocol GameSceneDelegate: AnyObject {
     func gameScene(_ scene: GameScene, didUpdateHUD score: Int, platform: Int, lives: Int, level: Int, energy: CGFloat)
@@ -9,102 +8,125 @@ protocol GameSceneDelegate: AnyObject {
     func gameSceneDidEndGame(_ scene: GameScene)
 }
 
-final class GameScene: SKScene, SKPhysicsContactDelegate {
+final class GameScene: SKScene {
+    private enum State { case ready, charging, jumping, paused, finished }
+    private struct Motion { let axis: CGVector; let amplitude: CGFloat; let period: TimeInterval; let origin: CGPoint }
+    private struct Fruit { let kind: FruitKind; let platformIndex: Int; let node: SKLabelNode }
+
     weak var gameDelegate: GameSceneDelegate?
-    var level = 1
-    var platformIndex = 0
-    var score = 0
-    var lives = 1
-    var isInfinite = false
+    var level = 1; var platformIndex = 0; var score = 0; var lives = 1; var isInfinite = false
     private let player = SKShapeNode(rectOf: CGSize(width: 38, height: 38), cornerRadius: 8)
-    private var platforms: [SKSpriteNode] = []
-    private var fruitNodes = [SKNode: FruitKind]()
-    private var isCharging = false
-    private var chargeStart: TimeInterval = 0
-    private var jumpCharge: CGFloat = 0
-    private var isGliding = false
-    private var glideEnergy: CGFloat = 1
-    private var lastUpdate: TimeInterval = 0
-    private let motionManager = CMMotionManager()
-    private var hasStarted = false
-    private var movingBackdropNodes: [SKNode] = []
+    private let preview = SKShapeNode(); private let landingMarker = SKShapeNode(circleOfRadius: 9)
+    private let gravity: CGFloat = 1_800; private let minimumPower: CGFloat = 0.13; private let chargeDuration: TimeInterval = 1.2
+    private var state: State = .ready; private var chargingSince: TimeInterval = 0; private var power: CGFloat = 0
+    private var velocity = CGVector.zero; private var previousPosition = CGPoint.zero; private var lastUpdate: TimeInterval = 0; private var elapsed: TimeInterval = 0
+    private var glideEnergy: CGFloat = 1; private var touchHeld = false; private var launchPlatform = 0; private var standingPlatform: Int?; private var rescueFromFall = false
+    private var platforms: [SKSpriteNode] = []; private var motions: [Int: Motion] = [:]; private var fruits: [Fruit] = []; private var collectedFruitPlatforms = Set<Int>()
+    private let motionManager = CMMotionManager(); private var motionBaseline: CMAcceleration?; private var calibratedTilt = CGVector.zero
     private(set) var pendingFruit: FruitKind?
-    private let playerCategory: UInt32 = 1
-    private let platformCategory: UInt32 = 2
-    private let fruitCategory: UInt32 = 4
 
-    override func didMove(to view: SKView) {
-        physicsWorld.gravity = CGVector(dx: 0, dy: -900)
-        physicsWorld.contactDelegate = self
-        backgroundColor = themeColor
-        setupPlayer()
-        startMotion()
-    }
-
-    var themeColor: SKColor {
-        [SKColor(red: 0.04, green: 0.07, blue: 0.16, alpha: 1), SKColor(red: 0.03, green: 0.20, blue: 0.12, alpha: 1), SKColor(red: 0.28, green: 0.13, blue: 0.03, alpha: 1), SKColor(red: 0.08, green: 0.22, blue: 0.32, alpha: 1), SKColor(red: 0.12, green: 0.05, blue: 0.25, alpha: 1)][min(level - 1, 4)]
-    }
+    override func didMove(to view: SKView) { backgroundColor = themeColor; setupPlayer(); startMotion() }
+    override func willMove(from view: SKView) { motionManager.stopDeviceMotionUpdates() }
+    var themeColor: SKColor { [SKColor(red: 0.04, green: 0.07, blue: 0.16, alpha: 1), SKColor(red: 0.03, green: 0.20, blue: 0.12, alpha: 1), SKColor(red: 0.28, green: 0.13, blue: 0.03, alpha: 1), SKColor(red: 0.08, green: 0.22, blue: 0.32, alpha: 1), SKColor(red: 0.12, green: 0.05, blue: 0.25, alpha: 1)][min(level - 1, 4)] }
 
     func begin(level: Int, progress: PlayerProgress, infinite: Bool = false) {
         self.level = level; isInfinite = infinite; platformIndex = infinite ? progress.infinitePlatform : progress.platform; score = infinite ? progress.infiniteScore : progress.score; lives = max(progress.lives, 1)
-        removeAllChildren(); platforms.removeAll(); fruitNodes.removeAll(); movingBackdropNodes.removeAll(); backgroundColor = themeColor; setupBackdrop(); setupPlayer(); buildCourse(); placePlayerOnCurrentPlatform(); hasStarted = true; reportHUD()
+        state = .ready; velocity = .zero; glideEnergy = 1; elapsed = 0; lastUpdate = 0; collectedFruitPlatforms.removeAll(); pendingFruit = nil
+        removeAllChildren(); platforms.removeAll(); motions.removeAll(); fruits.removeAll(); backgroundColor = themeColor
+        setupBackdrop(); setupPlayer(); buildCourse(); placePlayer(on: platformIndex); reportHUD()
     }
 
     private func setupPlayer() {
-        player.removeAllChildren(); player.removeFromParent(); let selectedCharacter = ProgressStore.shared.load().selectedCharacter % 4; player.fillColor = [.orange, .systemBlue, .systemYellow, .systemGreen][selectedCharacter]; player.strokeColor = .white.withAlphaComponent(0.45); player.position = CGPoint(x: size.width * 0.24, y: 120); player.name = "player"; let highlight = SKShapeNode(rectOf: CGSize(width: 27, height: 9), cornerRadius: 5); highlight.fillColor = .white.withAlphaComponent(0.17); highlight.strokeColor = .clear; highlight.position = CGPoint(x: 0, y: 9); player.addChild(highlight); let eyeStyle: (CGFloat) -> SKShapeNode = { x in let eye = SKShapeNode(circleOfRadius: 6); eye.fillColor = .white; eye.strokeColor = .clear; eye.position = CGPoint(x: x, y: 5); let pupil = SKShapeNode(circleOfRadius: 2.5); pupil.fillColor = SKColor(red: 0.12, green: 0.16, blue: 0.22, alpha: 1); pupil.strokeColor = .clear; pupil.position = CGPoint(x: 1.2, y: 0); eye.addChild(pupil); return eye }; player.addChild(eyeStyle(-9)); player.addChild(eyeStyle(9)); let mouth = SKShapeNode(rectOf: CGSize(width: 15, height: 3), cornerRadius: 1.5); mouth.fillColor = SKColor(red: 0.48, green: 0.18, blue: 0.07, alpha: 1); mouth.strokeColor = .clear; mouth.position = CGPoint(x: 0, y: -9); player.addChild(mouth); player.physicsBody = SKPhysicsBody(rectangleOf: player.frame.size); player.physicsBody?.allowsRotation = false; player.physicsBody?.restitution = 0; player.physicsBody?.categoryBitMask = playerCategory; player.physicsBody?.contactTestBitMask = platformCategory | fruitCategory; player.physicsBody?.collisionBitMask = platformCategory; addChild(player)
+        player.removeAllChildren(); player.removeFromParent(); let character = ProgressStore.shared.load().selectedCharacter % 4; player.fillColor = [.orange, .systemBlue, .systemYellow, .systemGreen][character]; player.strokeColor = .white.withAlphaComponent(0.45); player.zPosition = 10
+        for x in [-9, 9] { let eye = SKShapeNode(circleOfRadius: 6); eye.fillColor = .white; eye.strokeColor = .clear; eye.position = CGPoint(x: x, y: 5); let pupil = SKShapeNode(circleOfRadius: 2.5); pupil.fillColor = .darkGray; pupil.strokeColor = .clear; pupil.position = CGPoint(x: 1.2, y: 0); eye.addChild(pupil); player.addChild(eye) }
+        let mouth = SKShapeNode(rectOf: CGSize(width: 15, height: 3), cornerRadius: 1.5); mouth.fillColor = .brown; mouth.strokeColor = .clear; mouth.position = CGPoint(x: 0, y: -9); player.addChild(mouth); addChild(player)
+        preview.strokeColor = .white.withAlphaComponent(0.72); preview.lineWidth = 2; preview.lineDashPattern = [5, 5]; preview.zPosition = 4; preview.isHidden = true; addChild(preview)
+        landingMarker.zPosition = 5; landingMarker.lineWidth = 3; landingMarker.fillColor = .clear; landingMarker.isHidden = true; addChild(landingMarker)
     }
 
-    private func setupBackdrop() { let moon = SKShapeNode(circleOfRadius: 28); moon.fillColor = SKColor(red: 1, green: 0.98, blue: 0.72, alpha: 1); moon.strokeColor = .clear; moon.position = CGPoint(x: size.width - 58, y: size.height - 105); moon.zPosition = -20; addChild(moon); for index in 0..<38 { let star = SKShapeNode(circleOfRadius: index % 4 == 0 ? 1.4 : 0.8); star.fillColor = .white.withAlphaComponent(0.7); star.strokeColor = .clear; star.position = CGPoint(x: CGFloat((index * 47) % max(Int(size.width), 1)), y: CGFloat(90 + (index * 83) % max(Int(size.height - 120), 1))); star.zPosition = -21; addChild(star) }; for index in 0..<5 { let cloud = SKShapeNode(ellipseOf: CGSize(width: 94, height: 28)); cloud.fillColor = SKColor(red: 0.34, green: 0.40, blue: 0.55, alpha: 0.55); cloud.strokeColor = .clear; cloud.position = CGPoint(x: CGFloat(index) * size.width / 4 + 20, y: size.height * (0.42 + CGFloat(index % 3) * 0.14)); cloud.zPosition = -19; addChild(cloud); movingBackdropNodes.append(cloud) } }
+    private func setupBackdrop() {
+        let moon = SKShapeNode(circleOfRadius: 28); moon.fillColor = .systemYellow; moon.strokeColor = .clear; moon.position = CGPoint(x: size.width - 58, y: size.height - 105); moon.zPosition = -20; addChild(moon)
+        for index in 0..<30 { let star = SKShapeNode(circleOfRadius: index.isMultiple(of: 4) ? 1.4 : 0.8); star.fillColor = .white.withAlphaComponent(0.7); star.strokeColor = .clear; star.position = CGPoint(x: CGFloat((index * 47) % max(Int(size.width), 1)), y: CGFloat(90 + (index * 83) % max(Int(size.height - 120), 1))); star.zPosition = -21; addChild(star) }
+    }
 
     private func buildCourse() {
-        let platformCount = isInfinite ? max(platformIndex + 115, 150) : 100
-        var vertical = size.height * 0.24
-        var horizontal = size.width * 0.12
-        for index in 0...platformCount {
-            let difficulty = CGFloat(level - 1) * 0.12 + CGFloat(index) / 850
-            let width = max(58, 118 - difficulty * 56)
-            if index > 0 { horizontal += 118 + difficulty * 55 + CGFloat.random(in: 0...28); vertical = min(max(size.height * 0.18, vertical + CGFloat.random(in: -42...42)), size.height * 0.42) }
-            let platform = SKSpriteNode(color: index == 0 ? .systemTeal : .systemIndigo, size: CGSize(width: width, height: 16)); platform.position = CGPoint(x: horizontal, y: vertical); platform.name = "platform-\(index)"; platform.physicsBody = SKPhysicsBody(rectangleOf: platform.size); platform.physicsBody?.isDynamic = false; platform.physicsBody?.categoryBitMask = platformCategory; addChild(platform); platforms.append(platform)
-            if index > 0 && index % 5 == 0 { addFruit(near: platform, index: index) }
-            if index > 12 && index % 9 == 0 { let distance = 32 + difficulty * 50; platform.run(.repeatForever(.sequence([.moveBy(x: distance, y: index % 2 == 0 ? 0 : distance / 2, duration: 1.8), .moveBy(x: -distance, y: index % 2 == 0 ? 0 : -distance / 2, duration: 1.8)]))) }
+        let count = isInfinite ? max(platformIndex + 115, 150) : 100; var x = size.width * 0.16; var y = size.height * 0.27
+        for index in 0...count {
+            let difficulty = min(1, CGFloat(index) / 87 * 1.15); let width = index == count && !isInfinite ? max(140, size.width * 0.38) : 134 - difficulty * 54
+            if index > 0 { x += CGFloat.random(in: 86 + difficulty * 86...110 + difficulty * 120); y = min(max(size.height * 0.34, y + CGFloat.random(in: -(20 + difficulty * 32)...20 + difficulty * 32)), size.height * 0.80) }
+            let platform = SKSpriteNode(color: index == count && !isInfinite ? .systemYellow : (index == 0 ? .systemTeal : .systemIndigo), size: CGSize(width: width, height: 16)); platform.position = CGPoint(x: x, y: y); platform.name = "platform-\(index)"; platform.zPosition = 2; addChild(platform); platforms.append(platform)
+            if index > 0 && index < count && index.isMultiple(of: 5) { addFruit(near: platform, index: index) }
+            if index > 12 && index.isMultiple(of: 9) { motions[index] = Motion(axis: index.isMultiple(of: 2) ? CGVector(dx: 1, dy: 0) : CGVector(dx: 0, dy: 1), amplitude: 20 + difficulty * 32, period: 3.6, origin: platform.position) }
         }
     }
 
-    private func placePlayerOnCurrentPlatform() { guard let platform = platforms.first(where: { $0.name == "platform-\(platformIndex)" }) else { return }; player.position = CGPoint(x: platform.position.x - platform.size.width * 0.18, y: platform.position.y + platform.size.height / 2 + player.frame.height / 2) }
-
     private func addFruit(near platform: SKSpriteNode, index: Int) {
         let roll = Int.random(in: 0...99); let kind: FruitKind = roll < 55 ? .apple : roll < 68 ? .banana : roll < 81 ? .grapes : roll < 92 ? .lemon : .broccoli
-        let label = SKLabelNode(text: kind.emoji); label.fontSize = 25; label.position = CGPoint(x: platform.position.x, y: platform.position.y + 28); label.name = "fruit"; label.physicsBody = SKPhysicsBody(circleOfRadius: 13); label.physicsBody?.isDynamic = false; label.physicsBody?.categoryBitMask = fruitCategory; label.physicsBody?.contactTestBitMask = playerCategory; addChild(label); fruitNodes[label] = kind
+        let node = SKLabelNode(text: kind.emoji); node.fontSize = 25; node.zPosition = 6; node.position = CGPoint(x: platform.position.x, y: platform.position.y + 28); addChild(node); fruits.append(Fruit(kind: kind, platformIndex: index, node: node))
     }
 
-    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) { guard hasStarted else { return }; if player.physicsBody?.velocity.dy ?? 0 < 5 { isCharging = true; jumpCharge = 0; chargeStart = CACurrentMediaTime() } else { isGliding = true } }
-    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) { releaseJumpIfNeeded(); isGliding = false }
-    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) { releaseJumpIfNeeded(); isGliding = false }
-    private func releaseJumpIfNeeded() { guard isCharging else { return }; jumpCharge = min(CGFloat(CACurrentMediaTime() - chargeStart) / 1.25, 1); player.physicsBody?.velocity = CGVector(dx: 150 + jumpCharge * 170, dy: 360 + jumpCharge * 300); isCharging = false; jumpCharge = 0; UIImpactFeedbackGenerator(style: .light).impactOccurred() }
+    private func placePlayer(on index: Int) { guard platforms.indices.contains(index) else { return }; let platform = platforms[index]; player.position = CGPoint(x: platform.position.x - platform.size.width * 0.18, y: platform.position.y + platform.size.height / 2 + player.frame.height / 2); previousPosition = player.position; standingPlatform = index }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) { guard state != .paused && state != .finished else { return }; touchHeld = true; if state == .ready { state = .charging; chargingSince = CACurrentMediaTime(); power = 0; preview.isHidden = false; landingMarker.isHidden = false } }
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) { touchHeld = false; releaseJump() }
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) { touchHeld = false; releaseJump() }
+    private func releaseJump() { guard state == .charging else { return }; let appliedPower = max(minimumPower, power); velocity = CGVector(dx: appliedPower * 700, dy: -(340 + appliedPower * 620)); launchPlatform = platformIndex; standingPlatform = nil; state = .jumping; preview.isHidden = true; landingMarker.isHidden = true; UIImpactFeedbackGenerator(style: .light).impactOccurred() }
 
     override func update(_ currentTime: TimeInterval) {
-        guard hasStarted else { return }; let delta = lastUpdate == 0 ? 0 : min(currentTime - lastUpdate, 0.05); lastUpdate = currentTime
-        if isCharging { jumpCharge = min(CGFloat(currentTime - chargeStart) / 1.25, 1) }
-        for node in movingBackdropNodes { node.position.x -= CGFloat(delta) * 18; if node.position.x < -60 { node.position.x = size.width + 60 } }
-        if isGliding && glideEnergy > 0 { player.physicsBody?.velocity.dy = max(player.physicsBody?.velocity.dy ?? 0, -85); glideEnergy = max(0, glideEnergy - CGFloat(delta) / glideDuration) }
-        if player.physicsBody?.velocity.dy ?? 0 <= 0, let standing = closestPlatformBelow(), abs(player.position.y - standing.position.y) < 45 { glideEnergy = min(1, glideEnergy + CGFloat(delta) * 1.8) }
-        if player.position.x > size.width * 0.46 { let shift = player.position.x - size.width * 0.34; player.position.x -= shift; for platform in platforms { platform.position.x -= shift }; for node in fruitNodes.keys { node.position.x -= shift } }
-        if player.position.y < -90 { handleFall() }; reportHUD()
+        guard state != .paused && state != .finished else { return }; let delta = lastUpdate == 0 ? 0 : min(CGFloat(currentTime - lastUpdate), 1 / 20); lastUpdate = currentTime; elapsed += TimeInterval(delta)
+        updatePlatforms(); updateFruitPositions()
+        if state == .charging { power = min(CGFloat((currentTime - chargingSince) / chargeDuration), 1); drawTrajectory(for: max(minimumPower, power)) }
+        if state == .jumping { updateJump(delta: delta) }
+        updateCamera(delta: delta); reportHUD()
     }
 
+    private func updatePlatforms() {
+        for (index, motion) in motions { guard platforms.indices.contains(index) else { continue }; let platform = platforms[index]; let old = platform.position; let phase = CGFloat(sin(elapsed / motion.period * .pi * 2)); platform.position = CGPoint(x: motion.origin.x + motion.axis.dx * motion.amplitude * phase, y: motion.origin.y + motion.axis.dy * motion.amplitude * phase); if standingPlatform == index && state == .ready { player.position.x += platform.position.x - old.x; player.position.y += platform.position.y - old.y } }
+    }
+    private func updateFruitPositions() { for fruit in fruits where !collectedFruitPlatforms.contains(fruit.platformIndex) && platforms.indices.contains(fruit.platformIndex) { let platform = platforms[fruit.platformIndex]; fruit.node.position = CGPoint(x: platform.position.x, y: platform.position.y + 28) } }
+
+    private func updateJump(delta: CGFloat) {
+        previousPosition = player.position; let gliding = velocity.dy > 30 && glideEnergy > 0 && (touchHeld || calibratedTilt.dy > 0.18); let appliedGravity = gliding ? gravity * 0.30 : gravity
+        if gliding { velocity.dx *= exp(-1.75 * delta); glideEnergy = max(0, glideEnergy - delta / glideDuration) }
+        velocity.dy = min(velocity.dy + appliedGravity * delta, gliding ? 360 : .greatestFiniteMagnitude); velocity.dx += max(-1, min(1, calibratedTilt.dx)) * 280 * delta
+        player.position.x += velocity.dx * delta; player.position.y -= velocity.dy * delta; player.xScale = velocity.dy < 0 ? 0.90 : 1.06; player.yScale = velocity.dy < 0 ? 1.12 : 0.92
+        if tryLand() { return }; collectTouchedFruit(); if player.position.y < -120 { handleFall() }
+    }
+
+    private func tryLand() -> Bool {
+        guard velocity.dy > 0 else { return false }; let index = platformIndex + 1; guard platforms.indices.contains(index) else { return false }; let platform = platforms[index]; let halfHeight = player.frame.height / 2; let top = platform.position.y + platform.size.height / 2
+        guard previousPosition.y - halfHeight >= top, player.position.y - halfHeight <= top else { return false }; let halfWidth = player.frame.width / 2
+        guard player.position.x + halfWidth >= platform.position.x - platform.size.width / 2, player.position.x - halfWidth <= platform.position.x + platform.size.width / 2 else { return false }; land(on: index); return true
+    }
+    private func land(on index: Int) {
+        let platform = platforms[index]; player.position.y = platform.position.y + platform.size.height / 2 + player.frame.height / 2; velocity = .zero; player.setScale(1); state = .ready; standingPlatform = index; platformIndex = index; glideEnergy = 1; score += 1
+        if abs(player.position.x - platform.position.x) <= platform.size.width * 0.18 { score += 1; UIImpactFeedbackGenerator(style: .rigid).impactOccurred() }; collectFruit(on: index)
+        if !isInfinite && index >= 100 { state = .finished; gameDelegate?.gameSceneDidFinishLevel(self) } else if isInfinite && index > 0 && index.isMultiple(of: 100) { state = .paused; gameDelegate?.gameScene(self, requestExam: .broccoli) }
+    }
+    private func collectTouchedFruit() { for fruit in fruits where !collectedFruitPlatforms.contains(fruit.platformIndex) && player.frame.insetBy(dx: -8, dy: -8).contains(fruit.node.position) { collect(fruit) } }
+    private func collectFruit(on index: Int) { for fruit in fruits where fruit.platformIndex == index && !collectedFruitPlatforms.contains(index) { collect(fruit) } }
+    private func collect(_ fruit: Fruit) { collectedFruitPlatforms.insert(fruit.platformIndex); fruit.node.removeFromParent(); pendingFruit = fruit.kind; switch fruit.kind { case .apple: lives += 1; pendingFruit = nil; case .banana, .grapes, .lemon: state = .paused; gameDelegate?.gameScene(self, requestExam: .rescue); case .broccoli: state = .paused; gameDelegate?.gameScene(self, requestExam: .broccoli) } }
+    private func handleFall() { velocity = .zero; player.setScale(1); glideEnergy = 1; if lives > 0 { lives -= 1; platformIndex = launchPlatform; placePlayer(on: launchPlatform); state = .ready } else { rescueFromFall = true; state = .paused; pendingFruit = nil; gameDelegate?.gameScene(self, requestExam: .rescue) } }
+
+    func resumeAfterExam(success: Bool, kind: ExamKind) {
+        if rescueFromFall {
+            rescueFromFall = false
+            guard success else { state = .finished; gameDelegate?.gameSceneDidEndGame(self); return }
+            platformIndex = launchPlatform; placePlayer(on: launchPlatform); velocity = .zero; glideEnergy = 1; state = .ready; reportHUD(); return
+        }
+        if success { if pendingFruit == .banana { lives += 1 }; if pendingFruit == .grapes { platformIndex = min(platformIndex + 3, platforms.count - 1); score += 3; placePlayer(on: platformIndex) }; pendingFruit = nil; velocity = .zero; glideEnergy = 1; state = .ready } else if pendingFruit == .grapes { platformIndex = max(0, platformIndex - 5); pendingFruit = nil; placePlayer(on: platformIndex); state = .ready } else if kind == .broccoli || kind == .final || pendingFruit == .lemon { pendingFruit = nil; state = .finished; gameDelegate?.gameSceneDidEndGame(self) } else { pendingFruit = nil; state = .ready }; reportHUD()
+    }
+    func setPaused(_ paused: Bool) { if paused && state != .finished { state = .paused; touchHeld = false } else if !paused && state == .paused && pendingFruit == nil { state = .ready; lastUpdate = 0 } }
+
+    private func drawTrajectory(for power: CGFloat) {
+        var point = player.position; var simulatedVelocity = CGVector(dx: power * 700, dy: -(340 + power * 620)); let path = CGMutablePath(); path.move(to: point); var landing: CGPoint?; let target = platforms.indices.contains(platformIndex + 1) ? platforms[platformIndex + 1] : nil
+        for _ in 0..<40 { simulatedVelocity.dy += gravity * 0.045; let previous = point; point.x += simulatedVelocity.dx * 0.045; point.y -= simulatedVelocity.dy * 0.045; path.addLine(to: point); if let target, simulatedVelocity.dy > 0, previous.y - player.frame.height / 2 >= target.position.y + target.size.height / 2, point.y - player.frame.height / 2 <= target.position.y + target.size.height / 2 { landing = point; break } }
+        preview.path = path; landingMarker.position = landing ?? point; let viable = landing.map { point in guard let target else { return false }; return point.x + player.frame.width / 2 >= target.position.x - target.size.width / 2 && point.x - player.frame.width / 2 <= target.position.x + target.size.width / 2 } ?? false; landingMarker.strokeColor = viable ? .systemGreen : .systemRed
+    }
+    private func updateCamera(delta: CGFloat) { guard player.position.x > size.width * 0.46 else { return }; let shift = (player.position.x - size.width * 0.34) * min(1, delta * 10); player.position.x -= shift; previousPosition.x -= shift; for platform in platforms { platform.position.x -= shift }; for (index, motion) in motions { motions[index] = Motion(axis: motion.axis, amplitude: motion.amplitude, period: motion.period, origin: CGPoint(x: motion.origin.x - shift, y: motion.origin.y)) }; for fruit in fruits { fruit.node.position.x -= shift }; preview.position.x -= shift; landingMarker.position.x -= shift }
     private var glideDuration: CGFloat { [3, 2.5, 2, 1.5, 1][min(level - 1, 4)] }
-    private func closestPlatformBelow() -> SKSpriteNode? { platforms.filter { $0.position.y <= player.position.y }.max { $0.position.y < $1.position.y } }
-    func didBegin(_ contact: SKPhysicsContact) {
-        let first = contact.bodyA; let second = contact.bodyB
-        if (first.categoryBitMask | second.categoryBitMask) == (playerCategory | fruitCategory) { let node = first.categoryBitMask == fruitCategory ? first.node : second.node; if let node, let fruit = fruitNodes.removeValue(forKey: node) { node.removeFromParent(); collect(fruit) } }
-        if (first.categoryBitMask | second.categoryBitMask) == (playerCategory | platformCategory), player.physicsBody?.velocity.dy ?? 0 <= 0 { guard let platform = first.categoryBitMask == platformCategory ? first.node : second.node, let name = platform.name, let index = Int(name.replacingOccurrences(of: "platform-", with: "")) else { return }; if index > platformIndex { score += 1; if abs(player.position.x - platform.position.x) < 12 { score += 1 }; platformIndex = index; if !isInfinite && platformIndex >= 100 { hasStarted = false; gameDelegate?.gameSceneDidFinishLevel(self) } else if isInfinite && platformIndex > 0 && platformIndex % 100 == 0 { hasStarted = false; gameDelegate?.gameScene(self, requestExam: .broccoli) } } }
-    }
-
-    private func collect(_ fruit: FruitKind) { switch fruit { case .apple: lives += 1; case .banana, .grapes, .lemon: pendingFruit = fruit; hasStarted = false; gameDelegate?.gameScene(self, requestExam: .rescue); case .broccoli: pendingFruit = fruit; hasStarted = false; gameDelegate?.gameScene(self, requestExam: .broccoli) }; reportHUD() }
-    private func handleFall() { guard hasStarted else { return }; lives -= 1; if lives >= 0 { player.position = closestPlatformBelow()?.position ?? CGPoint(x: size.width / 2, y: 120); player.position.y += 45; player.physicsBody?.velocity = .zero } else { hasStarted = false; gameDelegate?.gameScene(self, requestExam: .rescue) }; reportHUD() }
-    func resumeAfterExam(success: Bool, kind: ExamKind) { if success { if pendingFruit == .banana { lives += 1 }; if pendingFruit == .grapes { platformIndex += 3; score += 3 }; lives = max(0, lives); pendingFruit = nil; hasStarted = true; player.position = closestPlatformBelow()?.position ?? player.position; player.position.y += 45; player.physicsBody?.velocity = .zero } else { if pendingFruit == .grapes { platformIndex = max(0, platformIndex - 5); pendingFruit = nil; hasStarted = true } else if kind == .broccoli || kind == .final || lives < 0 || pendingFruit == .lemon { pendingFruit = nil; gameDelegate?.gameSceneDidEndGame(self) } }; reportHUD() }
     func snapshot(into progress: inout PlayerProgress) { if isInfinite { progress.infinitePlatform = platformIndex; progress.infiniteScore = score } else { progress.currentLevel = level; progress.platform = platformIndex; progress.score = score; progress.lives = lives } }
-    private func reportHUD() { gameDelegate?.gameScene(self, didUpdateHUD: score, platform: platformIndex, lives: lives, level: level, energy: isCharging ? jumpCharge : glideEnergy) }
-    private func startMotion() { guard motionManager.isDeviceMotionAvailable else { return }; motionManager.deviceMotionUpdateInterval = 1 / 60; motionManager.startDeviceMotionUpdates(to: .main) { [weak self] motion, _ in guard let self, let gravity = motion?.gravity else { return }; self.player.physicsBody?.applyForce(CGVector(dx: gravity.x * 32, dy: 0)); if gravity.y > 0.45 { self.isGliding = true } } }
+    private func reportHUD() { gameDelegate?.gameScene(self, didUpdateHUD: score, platform: platformIndex, lives: lives, level: level, energy: state == .charging ? power : glideEnergy) }
+    private func startMotion() { guard motionManager.isDeviceMotionAvailable else { return }; motionManager.deviceMotionUpdateInterval = 1 / 60; motionManager.startDeviceMotionUpdates(to: .main) { [weak self] motion, _ in guard let self, let gravity = motion?.gravity else { return }; if self.motionBaseline == nil { self.motionBaseline = gravity }; guard let baseline = self.motionBaseline else { return }; let x = gravity.x - baseline.x; let y = gravity.y - baseline.y; self.calibratedTilt = CGVector(dx: abs(x) > 0.07 ? max(-0.7, min(0.7, x)) : 0, dy: abs(y) > 0.12 ? max(-0.7, min(0.7, y)) : 0) } }
     deinit { motionManager.stopDeviceMotionUpdates() }
 }
