@@ -1,0 +1,20 @@
+workflows:
+  vet-jump-ios:
+    name: Vet JUMP iOS
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    environment:
+      xcode: latest
+      vars:
+        XCODE_WORKSPACE: VetJUMP.xcodeproj
+        XCODE_SCHEME: Vet JUMP
+    scripts:
+      - name: Configure bundle identifier and build number
+        script: |
+          agvtool new-version -all "$BUILD_NUMBER"
+      - name: Build unsigned iOS archive
+        script: |
+          xcodebuild -project "$XCODE_WORKSPACE" -scheme "$XCODE_SCHEME" -configuration Release -sdk iphoneos -archivePath "$CM_BUILD_DIR/build/VetJUMP.xcarchive" archive CODE_SIGNING_ALLOWED=NO
+    artifacts:
+      - build/**/*.xcarchive
+      - /tmp/xcodebuild_logs/*.log
