@@ -15,7 +15,7 @@ workflows:
         XCODE_SCHEME: Vet JUMP
     scripts:
       - name: Apply App Store signing profile
-        script: xcode-project use-profiles
+        script: xcode-project use-profiles --project "$XCODE_PROJECT"
       - name: Configure bundle identifier and build number
         script: |
           agvtool new-version -all "$BUILD_NUMBER"
