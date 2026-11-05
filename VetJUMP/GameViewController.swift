@@ -16,6 +16,7 @@ final class GameViewController: UIViewController, GameSceneDelegate {
     private var questionIndex = 0
     private var correctCount = 0
     private var selectedAnswer: String?
+    private var lastReportedInfiniteScore = 0
     private let overlay = UIView()
     private let panel = UIStackView()
 
@@ -44,7 +45,7 @@ final class GameViewController: UIViewController, GameSceneDelegate {
     private func addButton(_ title: String, action: Selector) { let button = UIButton(type: .system); button.setTitle(title, for: .normal); button.titleLabel?.font = .systemFont(ofSize: 17, weight: .bold); button.setTitleColor(.black, for: .normal); button.backgroundColor = .systemYellow; button.layer.cornerRadius = 13; button.heightAnchor.constraint(equalToConstant: 50).isActive = true; button.addTarget(self, action: action, for: .touchUpInside); panel.addArrangedSubview(button) }
     private func clearPanel() { panel.arrangedSubviews.forEach { $0.removeFromSuperview() } }
 
-    func gameScene(_ scene: GameScene, didUpdateHUD score: Int, platform: Int, lives: Int, level: Int, energy: CGFloat) { scoreLabel.text = "⭐ \(score)"; progressLabel.text = scene.isInfinite ? "∞ \(platform)" : "\(platform)/100"; livesLabel.text = "🍎 \(max(lives, 0))"; self.energy.progress = Float(energy); scene.snapshot(into: &progress); ProgressStore.shared.save(progress) }
+    func gameScene(_ scene: GameScene, didUpdateHUD score: Int, platform: Int, lives: Int, level: Int, energy: CGFloat) { scoreLabel.text = "⭐ \(score)"; progressLabel.text = scene.isInfinite ? "∞ \(platform)" : "\(platform)/100"; livesLabel.text = "🍎 \(max(lives, 0))"; self.energy.progress = Float(energy); if scene.isInfinite && score >= lastReportedInfiniteScore + 10 { lastReportedInfiniteScore = score; reportScore(score, leaderboard: "vet_jump_infinite_score") }; scene.snapshot(into: &progress); ProgressStore.shared.save(progress) }
     func gameScene(_ scene: GameScene, requestExam kind: ExamKind) { currentExamKind = kind; currentExam = questionService.exam(kind: kind, level: scene.level, excluding: progress.answeredQuestionIDs); questionIndex = 0; correctCount = 0; selectedAnswer = nil; presentQuestion() }
     func gameSceneDidFinishLevel(_ scene: GameScene) { currentExamKind = .final; currentExam = questionService.exam(kind: .final, level: scene.level, excluding: progress.answeredQuestionIDs); questionIndex = 0; correctCount = 0; presentQuestion() }
     func gameSceneDidEndGame(_ scene: GameScene) { showEndGame("Fin de partida", detail: "No has superado el examen. Puedes intentarlo de nuevo desde la plataforma 0 del nivel.") }
