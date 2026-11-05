@@ -28,4 +28,3 @@ workflows:
     publishing:
       app_store_connect:
         auth: integration
-      - /tmp/xcodebuild_logs/*.log
