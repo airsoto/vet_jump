@@ -35,6 +35,7 @@ struct Explanation: Decodable { let porQueCorrecta: String; enum CodingKeys: Str
 struct PlayerProgress: Codable {
     var selectedCharacter = 0
     var unlockedLevel = 1
+    var completedLevel = 0
     var currentLevel = 1
     var platform = 0
     var score = 0
@@ -43,6 +44,27 @@ struct PlayerProgress: Codable {
     var subjectStats = [String: SubjectStat]()
     var infinitePlatform = 0
     var infiniteScore = 0
+
+    var hasCompletedAllLevels: Bool { completedLevel >= 5 }
+
+    enum CodingKeys: String, CodingKey { case selectedCharacter, unlockedLevel, completedLevel, currentLevel, platform, score, lives, answeredQuestionIDs, subjectStats, infinitePlatform, infiniteScore }
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        selectedCharacter = try container.decodeIfPresent(Int.self, forKey: .selectedCharacter) ?? 0
+        unlockedLevel = try container.decodeIfPresent(Int.self, forKey: .unlockedLevel) ?? 1
+        completedLevel = try container.decodeIfPresent(Int.self, forKey: .completedLevel) ?? 0
+        currentLevel = try container.decodeIfPresent(Int.self, forKey: .currentLevel) ?? 1
+        platform = try container.decodeIfPresent(Int.self, forKey: .platform) ?? 0
+        score = try container.decodeIfPresent(Int.self, forKey: .score) ?? 0
+        lives = try container.decodeIfPresent(Int.self, forKey: .lives) ?? 1
+        answeredQuestionIDs = try container.decodeIfPresent(Set<Int>.self, forKey: .answeredQuestionIDs) ?? []
+        subjectStats = try container.decodeIfPresent([String: SubjectStat].self, forKey: .subjectStats) ?? [:]
+        infinitePlatform = try container.decodeIfPresent(Int.self, forKey: .infinitePlatform) ?? 0
+        infiniteScore = try container.decodeIfPresent(Int.self, forKey: .infiniteScore) ?? 0
+    }
 }
 
 struct SubjectStat: Codable { var correct = 0; var total = 0 }
