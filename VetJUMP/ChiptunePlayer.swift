@@ -30,7 +30,7 @@ final class ChiptunePlayer {
         for frame in 0..<Int(buffer.frameLength) {
             let noteIndex = (frame / samplesPerNote) % melody.count
             let phase = Float(frame % samplesPerNote) * melody[noteIndex] / Float(format.sampleRate)
-            let square = phase.truncatingRemainder(dividingBy: 1) < 0.5 ? 0.055 : -0.055
+            let square: Float = phase.truncatingRemainder(dividingBy: 1) < 0.5 ? 0.055 : -0.055
             samples[frame] = square
         }
         player.scheduleBuffer(buffer, completionHandler: { [weak self] in DispatchQueue.main.async { guard self?.isPlaying == true else { return }; self?.scheduleLoop() } })
