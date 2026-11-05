@@ -15,13 +15,13 @@ Juego educativo vertical para iPhone, construido en Swift, SpriteKit, Core Motio
 ## Abrir y configurar
 
 1. Abre `VetJUMP.xcodeproj` en Xcode 16 o posterior.
-2. En el target **Vet JUMP**, cambia `Product Bundle Identifier` (`com.example.vetjump`) por tu identificador único.
+2. El target **Vet JUMP** usa el identificador `com.airsoto.vetjump` y el equipo de desarrollo `V685Z9VC3Z`. El perfil de App Store que se configure en Codemagic debe corresponder exactamente a ambos valores.
 3. Selecciona tu equipo de firma. La app requiere iOS 16 o posterior.
 4. Para cada lanzamiento, actualiza `MARKETING_VERSION`; Codemagic incrementa `CURRENT_PROJECT_VERSION` automáticamente con `BUILD_NUMBER`.
 
 ## Codemagic
 
-El archivo `codemagic.yaml` genera un archivo `.xcarchive`. En Codemagic añade tu certificado/provisioning profile y ajusta `CODE_SIGNING_ALLOWED=NO` si deseas exportar un `.ipa` firmado para TestFlight. Apple y App Store Connect no se gestionan desde este repositorio.
+El archivo `codemagic.yaml` genera un `.ipa` firmado. En Codemagic deben existir el perfil `vetjump_appstore_profile` y el certificado `vetjump_distribution`; ambos han de pertenecer al equipo `V685Z9VC3Z`, y el perfil ha de ser de tipo App Store para `com.airsoto.vetjump`. Apple y App Store Connect no se gestionan desde este repositorio.
 
 ## Controles
 
