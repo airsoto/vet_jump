@@ -15,7 +15,7 @@ final class GameScene: SKScene {
 
     weak var gameDelegate: GameSceneDelegate?
     var level = 1; var platformIndex = 0; var score = 0; var lives = 1; var isInfinite = false
-    private let player = SKShapeNode(rectOf: CGSize(width: 28, height: 28), cornerRadius: 7)
+    private let player = SKShapeNode(rectOf: CGSize(width: 28, height: 28), cornerRadius: 5)
     private let preview = SKShapeNode(); private let landingMarker = SKShapeNode(circleOfRadius: 9)
     private let gravity: CGFloat = 1_800; private let minimumPower: CGFloat = 0.13; private let chargeDuration: TimeInterval = 1.2
     private var state: State = .ready; private var chargingSince: TimeInterval = 0; private var power: CGFloat = 0
@@ -37,9 +37,10 @@ final class GameScene: SKScene {
     }
 
     private func setupPlayer() {
-        player.removeAllChildren(); player.removeFromParent(); let character = ProgressStore.shared.load().selectedCharacter % 4; player.fillColor = [.orange, .systemBlue, .systemYellow, .systemGreen][character]; player.strokeColor = .white.withAlphaComponent(0.45); player.zPosition = 10
-        for x in [-9, 9] { let eye = SKShapeNode(circleOfRadius: 6); eye.fillColor = .white; eye.strokeColor = .clear; eye.position = CGPoint(x: x, y: 5); let pupil = SKShapeNode(circleOfRadius: 2.5); pupil.fillColor = .darkGray; pupil.strokeColor = .clear; pupil.position = CGPoint(x: 1.2, y: 0); eye.addChild(pupil); player.addChild(eye) }
-        let mouth = SKShapeNode(rectOf: CGSize(width: 15, height: 3), cornerRadius: 1.5); mouth.fillColor = .brown; mouth.strokeColor = .clear; mouth.position = CGPoint(x: 0, y: -9); player.addChild(mouth); addChild(player)
+        player.removeAllChildren(); player.removeFromParent(); let character = ProgressStore.shared.load().selectedCharacter % 4; player.fillColor = [SKColor(red: 1, green: 0.53, blue: 0.13, alpha: 1), SKColor(red: 0.05, green: 0.55, blue: 0.95, alpha: 1), SKColor(red: 1, green: 0.78, blue: 0.10, alpha: 1), SKColor(red: 0.23, green: 0.76, blue: 0.39, alpha: 1)][character]; player.strokeColor = .white.withAlphaComponent(0.60); player.lineWidth = 1.5; player.zPosition = 10
+        let highlight = SKShapeNode(rectOf: CGSize(width: 18, height: 4), cornerRadius: 2); highlight.fillColor = .white.withAlphaComponent(0.23); highlight.strokeColor = .clear; highlight.position = CGPoint(x: -2, y: 10); player.addChild(highlight)
+        for x in [-8, 8] { let eye = SKShapeNode(circleOfRadius: 5); eye.fillColor = .white; eye.strokeColor = .clear; eye.position = CGPoint(x: x, y: 3); let pupil = SKShapeNode(circleOfRadius: 2.25); pupil.fillColor = SKColor(red: 0.08, green: 0.12, blue: 0.20, alpha: 1); pupil.strokeColor = .clear; pupil.position = CGPoint(x: 1, y: -0.5); eye.addChild(pupil); player.addChild(eye) }
+        let mouth = SKShapeNode(rectOf: CGSize(width: 13, height: 3), cornerRadius: 1.5); mouth.fillColor = SKColor(red: 0.45, green: 0.18, blue: 0.06, alpha: 1); mouth.strokeColor = .clear; mouth.position = CGPoint(x: 0, y: -8); player.addChild(mouth); addChild(player)
         preview.strokeColor = .white.withAlphaComponent(0.72); preview.lineWidth = 2; preview.zPosition = 4; preview.isHidden = true; addChild(preview)
         landingMarker.zPosition = 5; landingMarker.lineWidth = 3; landingMarker.fillColor = .clear; landingMarker.isHidden = true; addChild(landingMarker)
     }
@@ -50,13 +51,14 @@ final class GameScene: SKScene {
     }
 
     private func buildCourse() {
-        let count = isInfinite ? max(platformIndex + 115, 150) : 100; var x = size.width * 0.16; var y = size.height * 0.27
+        let count = isInfinite ? max(platformIndex + 115, 150) : 100; var x = size.width * 0.16; var y = size.height * 0.27; var previousWidth: CGFloat = 132
         for index in 0...count {
             let difficulty = min(1, CGFloat(index) / 87 * 1.15); let width = index == count && !isInfinite ? max(140, size.width * 0.38) : 134 - difficulty * 54
-            if index > 0 { x += CGFloat.random(in: 86 + difficulty * 86...110 + difficulty * 120); y = min(max(size.height * 0.34, y + CGFloat.random(in: -(20 + difficulty * 32)...20 + difficulty * 32)), size.height * 0.80) }
+            if index > 0 { let gap = CGFloat.random(in: 86 + difficulty * 86...110 + difficulty * 120); x += previousWidth / 2 + gap + width / 2; y = min(max(size.height * 0.34, y + CGFloat.random(in: -(20 + difficulty * 32)...20 + difficulty * 32)), size.height * 0.80) }
             let platform = SKSpriteNode(color: index == count && !isInfinite ? .systemYellow : (index == 0 ? .systemTeal : .systemIndigo), size: CGSize(width: width, height: 16)); platform.position = CGPoint(x: x, y: y); platform.name = "platform-\(index)"; platform.zPosition = 2; addChild(platform); platforms.append(platform)
             if index > 0 && index < count && index.isMultiple(of: 5) { addFruit(near: platform, index: index) }
             if index > 12 && index.isMultiple(of: 9) { motions[index] = Motion(axis: index.isMultiple(of: 2) ? CGVector(dx: 1, dy: 0) : CGVector(dx: 0, dy: 1), amplitude: 20 + difficulty * 32, period: 3.6, origin: platform.position) }
+            previousWidth = width
         }
     }
 
