@@ -61,7 +61,7 @@ final class ChiptunePlayer {
 
     private func select(tracks: [String], key: String) {
         guard !tracks.isEmpty else { return }
-        if currentSelectionKey == key, player?.isPlaying == true { return }
+        guard currentSelectionKey != key else { return }
         currentSelectionKey = key
         currentTrack = tracks.randomElement()
         shouldResumeAfterQuestion = false
@@ -69,7 +69,7 @@ final class ChiptunePlayer {
     }
 
     private func playCurrentTrack() {
-        guard !isMuted, let currentTrack, let url = Bundle.main.url(forResource: currentTrack, withExtension: "m4a", subdirectory: "Music") else { return }
+        guard !isMuted, let currentTrack, let url = trackURL(named: currentTrack) else { return }
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
@@ -104,6 +104,11 @@ final class ChiptunePlayer {
     }
 
     private func allTracks() -> [String] {
-        Bundle.main.urls(forResourcesWithExtension: "m4a", subdirectory: "Music")?.map { $0.deletingPathExtension().lastPathComponent } ?? []
+        let tracks = Bundle.main.urls(forResourcesWithExtension: "m4a", subdirectory: "Music") ?? Bundle.main.urls(forResourcesWithExtension: "m4a", subdirectory: nil) ?? []
+        return tracks.map { $0.deletingPathExtension().lastPathComponent }
+    }
+
+    private func trackURL(named name: String) -> URL? {
+        Bundle.main.url(forResource: name, withExtension: "m4a", subdirectory: "Music") ?? Bundle.main.url(forResource: name, withExtension: "m4a")
     }
 }
