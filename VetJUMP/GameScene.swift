@@ -10,17 +10,26 @@ protocol GameSceneDelegate: AnyObject {
 
 final class GameScene: SKScene {
     private enum State { case ready, charging, jumping, paused, finished }
+    private enum PlayerExpression { case neutral, charging, ascending, falling, landing }
     private struct Motion { let axis: CGVector; let amplitude: CGFloat; let period: TimeInterval; let origin: CGPoint }
     private struct Fruit { let kind: FruitKind; let platformIndex: Int; let node: SKLabelNode }
 
     weak var gameDelegate: GameSceneDelegate?
     var level = 1; var platformIndex = 0; var score = 0; var lives = 1; var isInfinite = false
     private let player = SKShapeNode(rectOf: CGSize(width: 28, height: 28), cornerRadius: 5)
+    private let leftEye = SKShapeNode(circleOfRadius: 5)
+    private let rightEye = SKShapeNode(circleOfRadius: 5)
+    private let leftPupil = SKShapeNode(circleOfRadius: 2.25)
+    private let rightPupil = SKShapeNode(circleOfRadius: 2.25)
+    private let mouth = SKShapeNode()
+    private let leftBrow = SKShapeNode()
+    private let rightBrow = SKShapeNode()
     private let preview = SKShapeNode(); private let landingMarker = SKShapeNode(circleOfRadius: 9)
     private let gravity: CGFloat = 1_800; private let minimumPower: CGFloat = 0.13; private let chargeDuration: TimeInterval = 1.2
     private var state: State = .ready; private var chargingSince: TimeInterval = 0; private var power: CGFloat = 0
     private var velocity = CGVector.zero; private var previousPosition = CGPoint.zero; private var lastUpdate: TimeInterval = 0; private var elapsed: TimeInterval = 0
     private var glideEnergy: CGFloat = 1; private var touchHeld = false; private var launchPlatform = 0; private var standingPlatform: Int?; private var rescueFromFall = false
+    private var playerExpression: PlayerExpression = .neutral; private var landingExpressionEndsAt: TimeInterval = 0
     private var platforms: [SKSpriteNode] = []; private var motions: [Int: Motion] = [:]; private var fruits: [Fruit] = []; private var collectedFruitPlatforms = Set<Int>()
     private let motionManager = CMMotionManager(); private var motionBaseline: CMAcceleration?; private var calibratedTilt = CGVector.zero
     private(set) var pendingFruit: FruitKind?
@@ -39,8 +48,9 @@ final class GameScene: SKScene {
     private func setupPlayer() {
         player.removeAllChildren(); player.removeFromParent(); let character = ProgressStore.shared.load().selectedCharacter % 4; player.fillColor = [SKColor(red: 1, green: 0.53, blue: 0.13, alpha: 1), SKColor(red: 0.05, green: 0.55, blue: 0.95, alpha: 1), SKColor(red: 1, green: 0.78, blue: 0.10, alpha: 1), SKColor(red: 0.23, green: 0.76, blue: 0.39, alpha: 1)][character]; player.strokeColor = .white.withAlphaComponent(0.60); player.lineWidth = 1.5; player.zPosition = 10
         let highlight = SKShapeNode(rectOf: CGSize(width: 18, height: 4), cornerRadius: 2); highlight.fillColor = .white.withAlphaComponent(0.23); highlight.strokeColor = .clear; highlight.position = CGPoint(x: -2, y: 10); player.addChild(highlight)
-        for x in [-8, 8] { let eye = SKShapeNode(circleOfRadius: 5); eye.fillColor = .white; eye.strokeColor = .clear; eye.position = CGPoint(x: x, y: 3); let pupil = SKShapeNode(circleOfRadius: 2.25); pupil.fillColor = SKColor(red: 0.08, green: 0.12, blue: 0.20, alpha: 1); pupil.strokeColor = .clear; pupil.position = CGPoint(x: 1, y: -0.5); eye.addChild(pupil); player.addChild(eye) }
-        let mouth = SKShapeNode(rectOf: CGSize(width: 13, height: 3), cornerRadius: 1.5); mouth.fillColor = SKColor(red: 0.45, green: 0.18, blue: 0.06, alpha: 1); mouth.strokeColor = .clear; mouth.position = CGPoint(x: 0, y: -8); player.addChild(mouth); addChild(player)
+        for (eye, pupil, x) in [(leftEye, leftPupil, -8), (rightEye, rightPupil, 8)] { eye.fillColor = .white; eye.strokeColor = .clear; eye.position = CGPoint(x: x, y: 3); pupil.fillColor = SKColor(red: 0.08, green: 0.12, blue: 0.20, alpha: 1); pupil.strokeColor = .clear; eye.addChild(pupil); player.addChild(eye) }
+        for brow in [leftBrow, rightBrow] { brow.strokeColor = SKColor(red: 0.34, green: 0.12, blue: 0.03, alpha: 1); brow.lineWidth = 2.6; brow.lineCap = .round; brow.isHidden = true; player.addChild(brow) }
+        mouth.strokeColor = SKColor(red: 0.45, green: 0.18, blue: 0.06, alpha: 1); mouth.fillColor = .clear; mouth.lineWidth = 2.4; mouth.lineCap = .round; player.addChild(mouth); playerExpression = .landing; setPlayerExpression(.neutral); addChild(player)
         preview.strokeColor = .white.withAlphaComponent(0.72); preview.lineWidth = 2; preview.zPosition = 4; preview.isHidden = true; addChild(preview)
         landingMarker.zPosition = 5; landingMarker.lineWidth = 3; landingMarker.fillColor = .clear; landingMarker.isHidden = true; addChild(landingMarker)
     }
@@ -79,6 +89,7 @@ final class GameScene: SKScene {
         updatePlatforms(); updateFruitPositions()
         if state == .charging { power = min(CGFloat((currentTime - chargingSince) / chargeDuration), 1); drawTrajectory(for: max(minimumPower, power)) }
         if state == .jumping { updateJump(delta: delta) }
+        updatePlayerAppearance()
         updateCamera(delta: delta); reportHUD()
     }
 
@@ -101,7 +112,7 @@ final class GameScene: SKScene {
         guard player.position.x + halfWidth >= platform.position.x - platform.size.width / 2, player.position.x - halfWidth <= platform.position.x + platform.size.width / 2 else { return false }; land(on: index); return true
     }
     private func land(on index: Int) {
-        let platform = platforms[index]; player.position.y = platform.position.y + platform.size.height / 2 + player.frame.height / 2; velocity = .zero; player.setScale(1); state = .ready; standingPlatform = index; platformIndex = index; glideEnergy = 1; score += 1
+        let platform = platforms[index]; player.setScale(1); player.position.y = platform.position.y + platform.size.height / 2 + player.frame.height / 2; velocity = .zero; state = .ready; landingExpressionEndsAt = elapsed + 0.18; standingPlatform = index; platformIndex = index; glideEnergy = 1; score += 1
         if abs(player.position.x - platform.position.x) <= platform.size.width * 0.18 { score += 1; UIImpactFeedbackGenerator(style: .rigid).impactOccurred() }; collectFruit(on: index)
         if !isInfinite && index >= 100 { state = .finished; gameDelegate?.gameSceneDidFinishLevel(self) } else if isInfinite && index > 0 && index.isMultiple(of: 100) { state = .paused; gameDelegate?.gameScene(self, requestExam: .broccoli) }
     }
@@ -119,6 +130,47 @@ final class GameScene: SKScene {
         if success { if pendingFruit == .banana { lives += 1 }; if pendingFruit == .grapes { platformIndex = min(platformIndex + 3, platforms.count - 1); score += 3; placePlayer(on: platformIndex) }; pendingFruit = nil; velocity = .zero; glideEnergy = 1; state = .ready } else if pendingFruit == .grapes { platformIndex = max(0, platformIndex - 5); pendingFruit = nil; placePlayer(on: platformIndex); state = .ready } else if kind == .broccoli || kind == .final || pendingFruit == .lemon { pendingFruit = nil; state = .finished; gameDelegate?.gameSceneDidEndGame(self) } else { pendingFruit = nil; state = .ready }; reportHUD()
     }
     func setPaused(_ paused: Bool) { if paused && state != .finished { state = .paused; touchHeld = false } else if !paused && state == .paused && pendingFruit == nil { state = .ready; lastUpdate = 0 } }
+
+    private func updatePlayerAppearance() {
+        switch state {
+        case .charging:
+            let amount = power; player.xScale = 1 + amount * 0.14; player.yScale = 1 - amount * 0.16; setPlayerExpression(.charging)
+        case .jumping where velocity.dy < 0:
+            player.xScale = 0.90; player.yScale = 1.12; setPlayerExpression(.ascending)
+        case .jumping:
+            player.xScale = 1.06; player.yScale = 0.92; setPlayerExpression(.falling)
+        case .ready where elapsed < landingExpressionEndsAt:
+            player.xScale = 1.13; player.yScale = 0.82; setPlayerExpression(.landing)
+        default:
+            player.setScale(1); setPlayerExpression(.neutral)
+        }
+    }
+
+    private func setPlayerExpression(_ expression: PlayerExpression) {
+        guard playerExpression != expression else { return }
+        playerExpression = expression
+        [leftEye, rightEye].forEach { $0.setScale(1); $0.fillColor = .white }
+        [leftPupil, rightPupil].forEach { $0.isHidden = false; $0.position = CGPoint(x: 1, y: -0.5) }
+        [leftBrow, rightBrow].forEach { $0.isHidden = true }
+        let smile = CGMutablePath(); smile.move(to: CGPoint(x: -6, y: -7)); smile.addQuadCurve(to: CGPoint(x: 6, y: -7), control: CGPoint(x: 0, y: -12))
+        mouth.path = smile; mouth.fillColor = .clear; mouth.strokeColor = SKColor(red: 0.45, green: 0.18, blue: 0.06, alpha: 1)
+        switch expression {
+        case .charging:
+            let leftPath = CGMutablePath(); leftPath.move(to: CGPoint(x: -12, y: 9)); leftPath.addLine(to: CGPoint(x: -4, y: 7)); leftBrow.path = leftPath
+            let rightPath = CGMutablePath(); rightPath.move(to: CGPoint(x: 12, y: 9)); rightPath.addLine(to: CGPoint(x: 4, y: 7)); rightBrow.path = rightPath
+            leftBrow.isHidden = false; rightBrow.isHidden = false
+            let focusedMouth = CGMutablePath(); focusedMouth.move(to: CGPoint(x: -4, y: -8)); focusedMouth.addLine(to: CGPoint(x: 0, y: -10)); focusedMouth.addLine(to: CGPoint(x: 4, y: -8)); mouth.path = focusedMouth
+        case .ascending:
+            leftPupil.position = CGPoint(x: 1.2, y: 0.2); rightPupil.position = CGPoint(x: 1.2, y: 0.2)
+        case .falling:
+            leftEye.yScale = 1.14; rightEye.yScale = 1.14; leftPupil.position = CGPoint(x: 0, y: -1); rightPupil.position = CGPoint(x: 0, y: -1)
+            mouth.path = CGPath(ellipseIn: CGRect(x: -3.5, y: -11, width: 7, height: 7), transform: nil); mouth.fillColor = SKColor(red: 0.45, green: 0.18, blue: 0.06, alpha: 1); mouth.strokeColor = .clear
+        case .landing:
+            leftEye.yScale = 0.28; rightEye.yScale = 0.28; leftPupil.isHidden = true; rightPupil.isHidden = true
+            let happyMouth = CGMutablePath(); happyMouth.move(to: CGPoint(x: -6, y: -7)); happyMouth.addQuadCurve(to: CGPoint(x: 6, y: -7), control: CGPoint(x: 0, y: -13)); mouth.path = happyMouth
+        case .neutral: break
+        }
+    }
 
     private func drawTrajectory(for power: CGFloat) {
         var point = player.position; var simulatedVelocity = CGVector(dx: power * 700, dy: -(340 + power * 620)); let path = CGMutablePath(); var landing: CGPoint?; let target = platforms.indices.contains(platformIndex + 1) ? platforms[platformIndex + 1] : nil
