@@ -2,45 +2,108 @@ import AVFoundation
 
 final class ChiptunePlayer {
     static let shared = ChiptunePlayer()
-    private let engine = AVAudioEngine()
-    private let player = AVAudioPlayerNode()
-    private var loopBuffer: AVAudioPCMBuffer?
-    private var isPlaying = false
-    private init() {
-        engine.attach(player)
-        let format = AVAudioFormat(standardFormatWithSampleRate: 22_050, channels: 1)!
-        engine.connect(player, to: engine.mainMixerNode, format: format)
+
+    private let mutedKey = "VetJUMP.musicMuted"
+    private var player: AVAudioPlayer?
+    private var currentTrack: String?
+    private var currentSelectionKey: String?
+    private var shouldResumeAfterQuestion = false
+
+    private(set) var isMuted: Bool {
+        didSet { UserDefaults.standard.set(isMuted, forKey: mutedKey) }
     }
 
-    func play() {
-        guard !isPlaying else { return }
+    private init() {
+        isMuted = UserDefaults.standard.bool(forKey: mutedKey)
+    }
+
+    func playMenu() {
+        select(tracks: ["02 - it is dangerous to be lonely without a sword (chiptune)"], key: "menu")
+    }
+
+    func updateGameMusic(level: Int, platform: Int, infinite: Bool) {
+        let selection = selection(for: level, platform: platform, infinite: infinite)
+        select(tracks: selection.tracks, key: selection.key)
+    }
+
+    func stopForQuestion() {
+        shouldResumeAfterQuestion = currentTrack != nil
+        player?.stop()
+        player = nil
+    }
+
+    func resumeAfterQuestion() {
+        guard shouldResumeAfterQuestion else { return }
+        shouldResumeAfterQuestion = false
+        playCurrentTrack()
+    }
+
+    func pause() {
+        player?.pause()
+    }
+
+    func resume() {
+        guard !isMuted else { return }
+        player?.play()
+    }
+
+    @discardableResult
+    func toggleMuted() -> Bool {
+        isMuted.toggle()
+        if isMuted {
+            player?.stop()
+            player = nil
+        } else {
+            playCurrentTrack()
+        }
+        return isMuted
+    }
+
+    private func select(tracks: [String], key: String) {
+        guard !tracks.isEmpty else { return }
+        if currentSelectionKey == key, player?.isPlaying == true { return }
+        currentSelectionKey = key
+        currentTrack = tracks.randomElement()
+        shouldResumeAfterQuestion = false
+        playCurrentTrack()
+    }
+
+    private func playCurrentTrack() {
+        guard !isMuted, let currentTrack, let url = Bundle.main.url(forResource: currentTrack, withExtension: "m4a", subdirectory: "Music") else { return }
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
             try session.setActive(true)
-            try engine.start()
-        } catch { return }
-        guard let buffer = makeLoopBuffer() else { engine.stop(); return }
-        loopBuffer = buffer
-        player.scheduleBuffer(buffer, at: nil, options: .loops)
-        player.play()
-        isPlaying = true
+            let audioPlayer = try AVAudioPlayer(contentsOf: url)
+            audioPlayer.numberOfLoops = -1
+            audioPlayer.volume = 0.62
+            audioPlayer.prepareToPlay()
+            audioPlayer.play()
+            player = audioPlayer
+        } catch {
+            player = nil
+        }
     }
 
-    func stop() { player.stop(); engine.stop(); loopBuffer = nil; isPlaying = false }
-
-    private func makeLoopBuffer() -> AVAudioPCMBuffer? {
-        let melody: [Float] = [261.63, 329.63, 392.0, 523.25, 392.0, 329.63, 293.66, 349.23, 440.0, 587.33, 440.0, 349.23]
-        guard let format = AVAudioFormat(standardFormatWithSampleRate: 22_050, channels: 1), let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 22_050 * 3) else { return nil }
-        buffer.frameLength = buffer.frameCapacity
-        let samples = buffer.floatChannelData![0]
-        let samplesPerNote = Int(format.sampleRate * 0.25)
-        for frame in 0..<Int(buffer.frameLength) {
-            let noteIndex = (frame / samplesPerNote) % melody.count
-            let phase = Float(frame % samplesPerNote) * melody[noteIndex] / Float(format.sampleRate)
-            let square: Float = phase.truncatingRemainder(dividingBy: 1) < 0.5 ? 0.08 : -0.08
-            samples[frame] = square
+    private func selection(for level: Int, platform: Int, infinite: Bool) -> (key: String, tracks: [String]) {
+        if infinite { return ("infinite", allTracks()) }
+        switch level {
+        case 1 where platform >= 75:
+            return ("level-1-late", ["14 - return to the planet of the lobsters", "25 - i have no joystick and i must press start"])
+        case 1:
+            return ("level-1", ["01 - super mushroom eater", "08 - quest of magic cowboy dude (chiptune)", "07 - the town where i got the magic bottle (chiptune)", "12 - youthful elf seeking adventure (chiptune)"])
+        case 2:
+            return ("level-2", ["10 - wandering around looking for ammunition", "07 - the town where i got the magic bottle (chiptune)", "12 - youthful elf seeking adventure (chiptune)"])
+        case 3:
+            return ("level-3", ["29 - in the land of morose where the ladies smoke cloves", "32 - famicommunist manifesto"])
+        case 4:
+            return ("level-4", ["39 - Dinosaur Spirit Guide (Sega-style FM Synth Remix)", "35 - The Creeper", "34 - dad got me a new nes game but it sucks"])
+        default:
+            return ("level-5", ["24 - hungry ghost fever", "52 - Castle of the Goblin Queen (Sega-style FM Synth Remix)"])
         }
-        return buffer
+    }
+
+    private func allTracks() -> [String] {
+        Bundle.main.urls(forResourcesWithExtension: "m4a", subdirectory: "Music")?.map { $0.deletingPathExtension().lastPathComponent } ?? []
     }
 }
