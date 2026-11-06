@@ -12,7 +12,8 @@ final class QuestionService {
         let preferred = difficultyOrder[min(max(level - 1, 0), difficultyOrder.count - 1)]
         let fresh = questions.filter { !usedIDs.contains($0.id) }
         let pool = fresh.isEmpty ? questions : fresh
-        let prioritised = pool.filter { $0.dificultad.lowercased() == preferred }
+        let difficulty = kind.usesHardQuestions ? "muy alta" : preferred
+        let prioritised = pool.filter { $0.dificultad.lowercased() == difficulty }
         let source = prioritised.count >= kind.questionCount ? prioritised : pool
         return Array(source.shuffled().prefix(kind.questionCount))
     }

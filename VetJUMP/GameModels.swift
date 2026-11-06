@@ -8,12 +8,28 @@ enum FruitKind: String, CaseIterable, Codable {
     }
 }
 
-enum ExamKind {
-    case rescue, broccoli, final
+enum ExamKind: Equatable {
+    case rescue, fallRescue(attempt: Int), broccoli, final
 
-    var questionCount: Int { switch self { case .final: 20; case .rescue, .broccoli: 10 } }
-    var requiredCorrect: Int { switch self { case .rescue: 7; case .broccoli: 8; case .final: 15 } }
-    var title: String { switch self { case .rescue: "RESCATE CLÍNICO"; case .broccoli: "EXAMEN BRÓCOLI"; case .final: "EXAMEN FINAL" } }
+    var questionCount: Int {
+        switch self {
+        case .fallRescue(let attempt): return attempt == 1 ? 1 : attempt == 2 ? 3 : 5
+        case .final: return 20
+        case .rescue, .broccoli: return 10
+        }
+    }
+
+    var requiredCorrect: Int {
+        switch self {
+        case .fallRescue(let attempt): return attempt == 1 ? 1 : attempt == 2 ? 2 : 4
+        case .rescue: return 7
+        case .broccoli: return 8
+        case .final: return 15
+        }
+    }
+    var usesHardQuestions: Bool { if case .fallRescue(let attempt) = self { return attempt == 1 }; return false }
+
+    static func fallRescueForAttempt(_ attempt: Int) -> ExamKind { .fallRescue(attempt: min(max(attempt, 1), 3)) }
 }
 
 struct ECVIMBank: Decodable { let preguntas: [ClinicalQuestion] }

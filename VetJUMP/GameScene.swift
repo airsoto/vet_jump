@@ -28,11 +28,12 @@ final class GameScene: SKScene {
     private let gravity: CGFloat = 1_800; private let minimumPower: CGFloat = 0.13; private let chargeDuration: TimeInterval = 1.2
     private var state: State = .ready; private var chargingSince: TimeInterval = 0; private var power: CGFloat = 0
     private var velocity = CGVector.zero; private var previousPosition = CGPoint.zero; private var lastUpdate: TimeInterval = 0; private var elapsed: TimeInterval = 0
-    private var glideEnergy: CGFloat = 1; private var touchHeld = false; private var launchPlatform = 0; private var standingPlatform: Int?; private var rescueFromFall = false
+    private var glideEnergy: CGFloat = 1; private var touchHeld = false; private var launchPlatform = 0; private var standingPlatform: Int?; private var rescueFromFall = false; private var zeroLifeFallCount = 0
     private var playerExpression: PlayerExpression = .neutral; private var landingExpressionEndsAt: TimeInterval = 0
     private var platforms: [SKSpriteNode] = []; private var motions: [Int: Motion] = [:]; private var fruits: [Fruit] = []; private var collectedFruitPlatforms = Set<Int>()
     private let motionManager = CMMotionManager(); private var motionBaseline: CMAcceleration?; private var calibratedTilt = CGVector.zero
     private(set) var pendingFruit: FruitKind?
+    var isGameOver: Bool { state == .finished }
 
     override func didMove(to view: SKView) { backgroundColor = themeColor; setupPlayer(); startMotion() }
     override func willMove(from view: SKView) { motionManager.stopDeviceMotionUpdates() }
@@ -40,7 +41,7 @@ final class GameScene: SKScene {
 
     func begin(level: Int, progress: PlayerProgress, infinite: Bool = false) {
         self.level = level; isInfinite = infinite; platformIndex = infinite ? progress.infinitePlatform : progress.platform; score = infinite ? progress.infiniteScore : progress.score; lives = max(progress.lives, 1)
-        state = .ready; velocity = .zero; glideEnergy = 1; elapsed = 0; lastUpdate = 0; collectedFruitPlatforms.removeAll(); pendingFruit = nil
+        state = .ready; velocity = .zero; glideEnergy = 1; elapsed = 0; lastUpdate = 0; collectedFruitPlatforms.removeAll(); pendingFruit = nil; rescueFromFall = false; zeroLifeFallCount = 0
         removeAllChildren(); platforms.removeAll(); motions.removeAll(); fruits.removeAll(); backgroundColor = themeColor
         setupBackdrop(); setupPlayer(); buildCourse(); placePlayer(on: platformIndex); reportHUD()
     }
@@ -119,7 +120,19 @@ final class GameScene: SKScene {
     private func collectTouchedFruit() { for fruit in fruits where !collectedFruitPlatforms.contains(fruit.platformIndex) && player.frame.insetBy(dx: -8, dy: -8).contains(fruit.node.position) { collect(fruit) } }
     private func collectFruit(on index: Int) { for fruit in fruits where fruit.platformIndex == index && !collectedFruitPlatforms.contains(index) { collect(fruit) } }
     private func collect(_ fruit: Fruit) { collectedFruitPlatforms.insert(fruit.platformIndex); fruit.node.removeFromParent(); pendingFruit = fruit.kind; switch fruit.kind { case .apple: lives += 1; pendingFruit = nil; case .banana, .grapes, .lemon: state = .paused; gameDelegate?.gameScene(self, requestExam: .rescue); case .broccoli: state = .paused; gameDelegate?.gameScene(self, requestExam: .broccoli) } }
-    private func handleFall() { velocity = .zero; player.setScale(1); glideEnergy = 1; if lives > 0 { lives -= 1; platformIndex = launchPlatform; placePlayer(on: launchPlatform); state = .ready } else { rescueFromFall = true; state = .paused; pendingFruit = nil; gameDelegate?.gameScene(self, requestExam: .rescue) } }
+    private func handleFall() {
+        velocity = .zero; player.setScale(1); glideEnergy = 1
+        if lives > 0 {
+            lives -= 1; platformIndex = launchPlatform; placePlayer(on: launchPlatform); state = .ready
+            return
+        }
+        zeroLifeFallCount += 1
+        guard zeroLifeFallCount < 4 else {
+            state = .finished; gameDelegate?.gameSceneDidEndGame(self); return
+        }
+        rescueFromFall = true; state = .paused; pendingFruit = nil
+        gameDelegate?.gameScene(self, requestExam: .fallRescueForAttempt(zeroLifeFallCount))
+    }
 
     func resumeAfterExam(success: Bool, kind: ExamKind) {
         if rescueFromFall {
