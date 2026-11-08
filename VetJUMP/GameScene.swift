@@ -77,8 +77,62 @@ final class GameScene: SKScene {
     }
 
     private func setupBackdrop() {
-        let moon = SKShapeNode(circleOfRadius: 28); moon.fillColor = .systemYellow; moon.strokeColor = .clear; moon.position = CGPoint(x: size.width - 58, y: size.height - 105); moon.zPosition = -20; addChild(moon)
-        for index in 0..<30 { let star = SKShapeNode(circleOfRadius: index.isMultiple(of: 4) ? 1.4 : 0.8); star.fillColor = .white.withAlphaComponent(0.7); star.strokeColor = .clear; star.position = CGPoint(x: CGFloat((index * 47) % max(Int(size.width), 1)), y: CGFloat(90 + (index * 83) % max(Int(size.height - 120), 1))); star.zPosition = -21; addChild(star) }
+        let nebulaColors = [SKColor(red: 0.16, green: 0.11, blue: 0.40, alpha: 0.20), SKColor(red: 0.04, green: 0.31, blue: 0.55, alpha: 0.16), SKColor(red: 0.31, green: 0.08, blue: 0.38, alpha: 0.13)]
+        for color in nebulaColors {
+            let cloud = SKShapeNode(circleOfRadius: CGFloat.random(in: 88...142))
+            cloud.fillColor = color
+            cloud.strokeColor = .clear
+            cloud.position = CGPoint(x: CGFloat.random(in: -30...max(size.width + 30, 1)), y: CGFloat.random(in: size.height * 0.18...max(size.height * 0.92, 1)))
+            cloud.zPosition = -24
+            addChild(cloud)
+        }
+
+        let moonGlow = SKShapeNode(circleOfRadius: 42)
+        moonGlow.fillColor = SKColor.systemYellow.withAlphaComponent(0.16)
+        moonGlow.strokeColor = .clear
+        moonGlow.position = CGPoint(x: size.width - 58, y: size.height - 105)
+        moonGlow.zPosition = -22
+        addChild(moonGlow)
+
+        let moon = SKShapeNode(circleOfRadius: 28)
+        moon.fillColor = SKColor(red: 1, green: 0.84, blue: 0.34, alpha: 1)
+        moon.strokeColor = .clear
+        moon.position = moonGlow.position
+        moon.zPosition = -21
+        addChild(moon)
+
+        for offset in [CGPoint(x: -9, y: 7), CGPoint(x: 8, y: 10), CGPoint(x: 10, y: -8)] {
+            let crater = SKShapeNode(circleOfRadius: 4)
+            crater.fillColor = SKColor(red: 0.72, green: 0.52, blue: 0.18, alpha: 0.32)
+            crater.strokeColor = .clear
+            crater.position = offset
+            moon.addChild(crater)
+        }
+
+        let starCount = max(64, Int((size.width * size.height) / 7_500))
+        for index in 0..<starCount {
+            let brightness = CGFloat.random(in: 0.38...1)
+            let radius = index.isMultiple(of: 11) ? CGFloat.random(in: 1.5...2.2) : CGFloat.random(in: 0.45...1.15)
+            let star = SKShapeNode(circleOfRadius: radius)
+            star.fillColor = (index.isMultiple(of: 7) ? SKColor.systemCyan : .white).withAlphaComponent(brightness)
+            star.strokeColor = .clear
+            star.position = CGPoint(x: CGFloat.random(in: 4...max(size.width - 4, 5)), y: CGFloat.random(in: 54...max(size.height - 38, 55)))
+            star.zPosition = -20
+            addChild(star)
+
+            guard index.isMultiple(of: 11) else { continue }
+            let sparklePath = CGMutablePath()
+            sparklePath.move(to: CGPoint(x: 0, y: -radius * 3.6))
+            sparklePath.addLine(to: CGPoint(x: 0, y: radius * 3.6))
+            sparklePath.move(to: CGPoint(x: -radius * 2.4, y: 0))
+            sparklePath.addLine(to: CGPoint(x: radius * 2.4, y: 0))
+            let sparkle = SKShapeNode(path: sparklePath)
+            sparkle.strokeColor = star.fillColor.withAlphaComponent(brightness * 0.65)
+            sparkle.lineWidth = 0.75
+            sparkle.position = star.position
+            sparkle.zPosition = -19
+            addChild(sparkle)
+        }
     }
 
     private func buildCourse() {
@@ -86,11 +140,59 @@ final class GameScene: SKScene {
         for index in 0...count {
             let difficulty = min(1, CGFloat(index) / 87 * 1.15); let width = index == count && !isInfinite ? max(140, size.width * 0.38) : 134 - difficulty * 54
             if index > 0 { let gap = CGFloat.random(in: 86 + difficulty * 86...110 + difficulty * 120); x += previousWidth / 2 + gap + width / 2; y = min(max(size.height * 0.34, y + CGFloat.random(in: -(20 + difficulty * 32)...20 + difficulty * 32)), size.height * 0.80) }
-            let platform = SKSpriteNode(color: index == count && !isInfinite ? .systemYellow : (index == 0 ? .systemTeal : .systemIndigo), size: CGSize(width: width, height: 16)); platform.position = CGPoint(x: x, y: y); platform.name = "platform-\(index)"; platform.zPosition = 2; addChild(platform); platforms.append(platform)
+            let platform = makePlatform(width: width, isStart: index == 0, isGoal: index == count && !isInfinite); platform.position = CGPoint(x: x, y: y); platform.name = "platform-\(index)"; platform.zPosition = 2; addChild(platform); platforms.append(platform)
             if index > 0 && index < count && index.isMultiple(of: 5) { addFruit(near: platform, index: index) }
             if index > 12 && index.isMultiple(of: 9) { motions[index] = Motion(axis: index.isMultiple(of: 2) ? CGVector(dx: 1, dy: 0) : CGVector(dx: 0, dy: 1), amplitude: 20 + difficulty * 32, period: 3.6, origin: platform.position) }
             previousWidth = width
         }
+    }
+
+    private func makePlatform(width: CGFloat, isStart: Bool, isGoal: Bool) -> SKSpriteNode {
+        let platform = SKSpriteNode(color: .clear, size: CGSize(width: width, height: 16))
+        let bodyColor = isGoal ? SKColor(red: 0.96, green: 0.54, blue: 0.14, alpha: 1) : (isStart ? SKColor(red: 0.08, green: 0.63, blue: 0.75, alpha: 1) : SKColor(red: 0.35, green: 0.23, blue: 0.78, alpha: 1))
+        let shadowColor = isGoal ? SKColor(red: 0.53, green: 0.19, blue: 0.13, alpha: 1) : (isStart ? SKColor(red: 0.03, green: 0.29, blue: 0.45, alpha: 1) : SKColor(red: 0.16, green: 0.09, blue: 0.48, alpha: 1))
+        let edgeColor = isGoal ? SKColor(red: 1, green: 0.87, blue: 0.37, alpha: 1) : (isStart ? SKColor(red: 0.40, green: 0.95, blue: 1, alpha: 1) : SKColor(red: 0.72, green: 0.56, blue: 1, alpha: 1))
+
+        let underside = SKShapeNode()
+        let undersidePath = CGMutablePath()
+        undersidePath.move(to: CGPoint(x: -width / 2 + 5, y: -4))
+        undersidePath.addLine(to: CGPoint(x: width / 2 - 5, y: -4))
+        undersidePath.addLine(to: CGPoint(x: width * 0.31, y: -18))
+        undersidePath.addLine(to: CGPoint(x: width * 0.08, y: -13))
+        undersidePath.addLine(to: CGPoint(x: -width * 0.15, y: -22))
+        undersidePath.addLine(to: CGPoint(x: -width * 0.34, y: -12))
+        undersidePath.closeSubpath()
+        underside.path = undersidePath
+        underside.fillColor = shadowColor
+        underside.strokeColor = .clear
+        underside.zPosition = -2
+        platform.addChild(underside)
+
+        let rock = SKShapeNode(rectOf: CGSize(width: width, height: 16), cornerRadius: 6)
+        rock.fillColor = bodyColor
+        rock.strokeColor = shadowColor.withAlphaComponent(0.78)
+        rock.lineWidth = 1.1
+        rock.position.y = -2
+        rock.zPosition = -1
+        platform.addChild(rock)
+
+        let top = SKShapeNode(rectOf: CGSize(width: width + 7, height: 7), cornerRadius: 3.5)
+        top.fillColor = edgeColor
+        top.strokeColor = .white.withAlphaComponent(0.35)
+        top.lineWidth = 0.8
+        top.position.y = 7
+        top.zPosition = 1
+        platform.addChild(top)
+
+        for fraction in [-0.31, -0.04, 0.24] {
+            let crystal = SKShapeNode(rectOf: CGSize(width: 5, height: 3), cornerRadius: 1.5)
+            crystal.fillColor = .white.withAlphaComponent(0.20)
+            crystal.strokeColor = .clear
+            crystal.position = CGPoint(x: width * fraction, y: 1)
+            crystal.zPosition = 2
+            platform.addChild(crystal)
+        }
+        return platform
     }
 
     private func addFruit(near platform: SKSpriteNode, index: Int) {
