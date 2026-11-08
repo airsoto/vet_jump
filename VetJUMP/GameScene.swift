@@ -13,6 +13,7 @@ final class GameScene: SKScene {
     private enum PlayerExpression { case neutral, charging, ascending, falling, landing }
     private struct Motion { let axis: CGVector; let amplitude: CGFloat; let period: TimeInterval; let origin: CGPoint }
     private struct Fruit { let kind: FruitKind; let platformIndex: Int; let node: SKLabelNode }
+    private struct StartConfiguration { let level: Int; let progress: PlayerProgress; let infinite: Bool }
 
     weak var gameDelegate: GameSceneDelegate?
     var level = 1; var platformIndex = 0; var score = 0; var lives = 1; var isInfinite = false
@@ -32,23 +33,41 @@ final class GameScene: SKScene {
     private var playerExpression: PlayerExpression = .neutral; private var landingExpressionEndsAt: TimeInterval = 0
     private var platforms: [SKSpriteNode] = []; private var motions: [Int: Motion] = [:]; private var fruits: [Fruit] = []; private var collectedFruitPlatforms = Set<Int>()
     private let motionManager = CMMotionManager(); private var motionBaseline: CMAcceleration?; private var calibratedTilt = CGVector.zero
+    private var pendingStart: StartConfiguration?
+    private var selectedCharacter = 0
     private(set) var pendingFruit: FruitKind?
     var isGameOver: Bool { state == .finished }
 
-    override func didMove(to view: SKView) { backgroundColor = themeColor; setupPlayer(); startMotion() }
+    override func didMove(to view: SKView) { startConfiguredGameIfPossible() }
     override func willMove(from view: SKView) { motionManager.stopDeviceMotionUpdates() }
     private var levelIndex: Int { min(max(level - 1, 0), 4) }
     var themeColor: SKColor { [SKColor(red: 0.04, green: 0.07, blue: 0.16, alpha: 1), SKColor(red: 0.03, green: 0.20, blue: 0.12, alpha: 1), SKColor(red: 0.28, green: 0.13, blue: 0.03, alpha: 1), SKColor(red: 0.08, green: 0.22, blue: 0.32, alpha: 1), SKColor(red: 0.12, green: 0.05, blue: 0.25, alpha: 1)][levelIndex] }
 
-    func begin(level: Int, progress: PlayerProgress, infinite: Bool = false) {
-        self.level = min(max(level, 1), 5); isInfinite = infinite; platformIndex = max(0, infinite ? progress.infinitePlatform : min(progress.platform, 100)); score = max(0, infinite ? progress.infiniteScore : progress.score); lives = max(progress.lives, 1)
-        state = .ready; velocity = .zero; glideEnergy = 1; elapsed = 0; lastUpdate = 0; collectedFruitPlatforms.removeAll(); pendingFruit = nil; rescueFromFall = false; zeroLifeFallCount = 0
+    func configure(level: Int, progress: PlayerProgress, infinite: Bool = false) {
+        pendingStart = StartConfiguration(level: level, progress: progress, infinite: infinite)
+        startConfiguredGameIfPossible()
+    }
+
+    private func startConfiguredGameIfPossible() {
+        guard view != nil, let configuration = pendingStart else { return }
+        pendingStart = nil
+        begin(configuration)
+    }
+
+    private func begin(_ configuration: StartConfiguration) {
+        level = min(max(configuration.level, 1), 5)
+        isInfinite = configuration.infinite
+        selectedCharacter = min(max(configuration.progress.selectedCharacter, 0), 3)
+        platformIndex = isInfinite ? min(max(configuration.progress.infinitePlatform, 0), 1_000) : min(max(configuration.progress.platform, 0), 99)
+        score = max(0, isInfinite ? configuration.progress.infiniteScore : configuration.progress.score)
+        lives = min(max(configuration.progress.lives, 1), 99)
+        state = .ready; velocity = .zero; glideEnergy = 1; elapsed = 0; lastUpdate = 0; collectedFruitPlatforms.removeAll(); pendingFruit = nil; rescueFromFall = false; zeroLifeFallCount = 0; motionBaseline = nil; calibratedTilt = .zero
         removeAllChildren(); platforms.removeAll(); motions.removeAll(); fruits.removeAll(); backgroundColor = themeColor
-        setupBackdrop(); setupPlayer(); buildCourse(); placePlayer(on: platformIndex); reportHUD()
+        setupBackdrop(); setupPlayer(); buildCourse(); placePlayer(on: platformIndex); startMotion(); reportHUD()
     }
 
     private func setupPlayer() {
-        player.removeAllChildren(); player.removeFromParent(); let character = min(max(ProgressStore.shared.load().selectedCharacter, 0), 3); player.fillColor = [SKColor(red: 1, green: 0.53, blue: 0.13, alpha: 1), SKColor(red: 0.05, green: 0.55, blue: 0.95, alpha: 1), SKColor(red: 1, green: 0.78, blue: 0.10, alpha: 1), SKColor(red: 0.23, green: 0.76, blue: 0.39, alpha: 1)][character]; player.strokeColor = .white.withAlphaComponent(0.60); player.lineWidth = 1.5; player.zPosition = 10
+        player.removeAllChildren(); player.removeFromParent(); player.fillColor = [SKColor(red: 1, green: 0.53, blue: 0.13, alpha: 1), SKColor(red: 0.05, green: 0.55, blue: 0.95, alpha: 1), SKColor(red: 1, green: 0.78, blue: 0.10, alpha: 1), SKColor(red: 0.23, green: 0.76, blue: 0.39, alpha: 1)][selectedCharacter]; player.strokeColor = .white.withAlphaComponent(0.60); player.lineWidth = 1.5; player.zPosition = 10
         let highlight = SKShapeNode(rectOf: CGSize(width: 18, height: 4), cornerRadius: 2); highlight.fillColor = .white.withAlphaComponent(0.23); highlight.strokeColor = .clear; highlight.position = CGPoint(x: -2, y: 10); player.addChild(highlight)
         for (eye, pupil, x) in [(leftEye, leftPupil, -8), (rightEye, rightPupil, 8)] { eye.fillColor = .white; eye.strokeColor = .clear; eye.position = CGPoint(x: x, y: 3); pupil.fillColor = SKColor(red: 0.08, green: 0.12, blue: 0.20, alpha: 1); pupil.strokeColor = .clear; eye.addChild(pupil); player.addChild(eye) }
         for brow in [leftBrow, rightBrow] { brow.strokeColor = SKColor(red: 0.34, green: 0.12, blue: 0.03, alpha: 1); brow.lineWidth = 2.6; brow.lineCap = .round; brow.isHidden = true; player.addChild(brow) }

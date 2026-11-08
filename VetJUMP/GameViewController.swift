@@ -20,6 +20,7 @@ final class GameViewController: UIViewController, GameSceneDelegate {
     private var selectedAnswer: String?
     private var lastReportedInfiniteScore = 0
     private var lastSavedRunSignature = ""
+    private var lastMusicSignature = ""
     private var fruitInfoOpenedFromGame = false
     private let overlay = UIView()
     private let panel = UIStackView()
@@ -55,14 +56,27 @@ final class GameViewController: UIViewController, GameSceneDelegate {
     @objc private func startSelectedLevel() { start(level: progress.unlockedLevel, infinite: false) }
     @objc private func startInfinite() { guard progress.hasCompletedAllLevels else { showInfiniteLocked(); return }; start(level: 5, infinite: true) }
     @objc private func showInfiniteLocked() { clearPanel(); addTitle("Modo infinito bloqueado", subtitle: "Supera los cinco niveles y sus exámenes finales para desbloquearlo."); addButton("Volver", action: #selector(showHomeAction)); overlay.isHidden = false }
-    private func start(level: Int, infinite: Bool) { let scene = GameScene(size: spriteView.bounds.size); scene.scaleMode = .resizeFill; scene.gameDelegate = self; gameScene = scene; lastSavedRunSignature = ""; spriteView.presentScene(scene); scene.begin(level: level, progress: progress, infinite: infinite); overlay.isHidden = true }
+    private func start(level: Int, infinite: Bool) {
+        view.layoutIfNeeded()
+        let sceneSize = spriteView.bounds.size
+        guard sceneSize.width > 0, sceneSize.height > 0 else { return }
+        let scene = GameScene(size: sceneSize)
+        scene.scaleMode = .resizeFill
+        scene.gameDelegate = self
+        scene.configure(level: level, progress: progress, infinite: infinite)
+        gameScene = scene
+        lastSavedRunSignature = ""
+        lastMusicSignature = ""
+        overlay.isHidden = true
+        spriteView.presentScene(scene)
+    }
 
     private func addTitle(_ title: String, subtitle: String) { let titleLabel = UILabel(); titleLabel.text = title; titleLabel.font = .systemFont(ofSize: 30, weight: .heavy); titleLabel.textColor = .systemYellow; titleLabel.textAlignment = .center; panel.addArrangedSubview(titleLabel); let subtitleLabel = UILabel(); subtitleLabel.text = subtitle; subtitleLabel.font = .systemFont(ofSize: 15, weight: .medium); subtitleLabel.textColor = .white; subtitleLabel.numberOfLines = 0; subtitleLabel.textAlignment = .center; panel.addArrangedSubview(subtitleLabel) }
     private func addFootnote(_ text: String) { let label = UILabel(); label.text = text; label.textColor = .lightGray; label.numberOfLines = 0; label.font = .systemFont(ofSize: 12); label.textAlignment = .center; panel.addArrangedSubview(label) }
     private func addButton(_ title: String, action: Selector) { let button = UIButton(type: .system); button.setTitle(title, for: .normal); button.titleLabel?.font = .systemFont(ofSize: 17, weight: .bold); button.setTitleColor(.black, for: .normal); button.backgroundColor = .systemYellow; button.layer.cornerRadius = 13; button.heightAnchor.constraint(equalToConstant: 50).isActive = true; button.addTarget(self, action: action, for: .touchUpInside); panel.addArrangedSubview(button) }
     private func clearPanel() { panel.arrangedSubviews.forEach { $0.removeFromSuperview() }; menuActionButtons.forEach { $0.removeFromSuperview() }; menuActionButtons.removeAll(); menuDecorationViews.forEach { $0.removeFromSuperview() }; menuDecorationViews.removeAll(); menuArtwork.isHidden = true; panel.isHidden = false; overlay.backgroundColor = UIColor.black.withAlphaComponent(0.62) }
 
-    func gameScene(_ scene: GameScene, didUpdateHUD score: Int, platform: Int, lives: Int, level: Int, energy: CGFloat) { scoreLabel.text = "⭐ \(score)"; progressLabel.text = scene.isInfinite ? "∞ \(platform)" : "\(platform)/100"; livesLabel.text = "🍎 \(max(lives, 0))"; self.energy.progress = Float(energy); ChiptunePlayer.shared.updateGameMusic(level: level, platform: platform, infinite: scene.isInfinite); if scene.isInfinite && score >= lastReportedInfiniteScore + 10 { lastReportedInfiniteScore = score; reportScore(score, leaderboard: "vet_jump_infinite_score") }; scene.snapshot(into: &progress); let signature = "\(scene.isInfinite)-\(level)-\(platform)-\(score)-\(lives)"; if signature != lastSavedRunSignature { lastSavedRunSignature = signature; ProgressStore.shared.save(progress) } }
+    func gameScene(_ scene: GameScene, didUpdateHUD score: Int, platform: Int, lives: Int, level: Int, energy: CGFloat) { scoreLabel.text = "⭐ \(score)"; progressLabel.text = scene.isInfinite ? "∞ \(platform)" : "\(platform)/100"; livesLabel.text = "🍎 \(max(lives, 0))"; self.energy.progress = Float(energy); let musicSignature = "\(scene.isInfinite)-\(level)-\(platform >= 75)"; if musicSignature != lastMusicSignature { lastMusicSignature = musicSignature; ChiptunePlayer.shared.updateGameMusic(level: level, platform: platform, infinite: scene.isInfinite) }; if scene.isInfinite && score >= lastReportedInfiniteScore + 10 { lastReportedInfiniteScore = score; reportScore(score, leaderboard: "vet_jump_infinite_score") }; scene.snapshot(into: &progress); let signature = "\(scene.isInfinite)-\(level)-\(platform)-\(score)-\(lives)"; if signature != lastSavedRunSignature { lastSavedRunSignature = signature; ProgressStore.shared.save(progress) } }
     func gameScene(_ scene: GameScene, requestExam kind: ExamKind) { ChiptunePlayer.shared.stopForQuestion(); currentExamKind = kind; currentExam = questionService.exam(kind: kind, level: scene.level, excluding: progress.answeredQuestionIDs); questionIndex = 0; correctCount = 0; selectedAnswer = nil; presentQuestion() }
     func gameSceneDidFinishLevel(_ scene: GameScene) { ChiptunePlayer.shared.stopForQuestion(); currentExamKind = .final; currentExam = questionService.exam(kind: .final, level: scene.level, excluding: progress.answeredQuestionIDs); questionIndex = 0; correctCount = 0; presentQuestion() }
     func gameSceneDidEndGame(_ scene: GameScene) { showEndGame("Fin de partida", detail: "No has superado el examen. Puedes intentarlo de nuevo desde la plataforma 0 del nivel.") }
